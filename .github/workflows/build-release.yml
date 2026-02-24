@@ -42,7 +42,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Crea .ico da png per Windows EXE icon
       - name: Make Windows icon (.ico)
         if: runner.os == 'Windows'
         working-directory: X_Trader_AutoBot
@@ -51,7 +50,6 @@ jobs:
           pip install pillow
           python -c "from PIL import Image; img=Image.open('assets/xtrader_icon.png').convert('RGBA'); img.save('assets/xtrader.ico', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
 
-      # BUILD con Nuitka-Action (mode=app-dist: standalone folder su Win/Linux, app bundle su macOS)
       - name: Build (Nuitka app-dist)
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -71,7 +69,6 @@ jobs:
           product-name: X-Trader AutoBot
           file-description: X-Trader AutoBot
 
-      # Individua output
       - name: Locate dist/app
         id: out
         shell: bash
@@ -85,18 +82,32 @@ jobs:
             echo "dist=$DIST" >> $GITHUB_OUTPUT
           fi
 
-      # (OPZIONALE) Windows code signing - solo se hai impostato i secrets
-      # Usa un action basato su signtool e PFX base64 (Windows runner only). :contentReference[oaicite:1]{index=1}
-      - name: Sign Windows EXE (optional)
-        if: runner.os == 'Windows' && github.ref_type == 'tag' && secrets.WIN_CERT_PFX_B64 != '' && secrets.WIN_CERT_PFX_PASSWORD != ''
-        uses: signpath/github-action-sign-files-with-pfx@v1
+      # Decide se la firma è configurata (senza usare 'secrets' nella condizione if)
+      - name: Detect Windows signing config
+        id: signcfg
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          WIN_CERT_PFX_B64: ${{ secrets.WIN_CERT_PFX_B64 }}
+          WIN_CERT_PFX_PASSWORD: ${{ secrets.WIN_CERT_PFX_PASSWORD }}
+          WIN_CERT_SHA1: ${{ secrets.WIN_CERT_SHA1 }}
+        run: |
+          if ($env:WIN_CERT_PFX_B64 -and $env:WIN_CERT_PFX_PASSWORD -and $env:WIN_CERT_SHA1) {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Sign Windows EXE/DLL (optional, tag only)
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v') && steps.signcfg.outputs.enabled == 'true'
+        uses: sauravkumarsahoo/sign-files-with-pfx@v1
         with:
           certificate: ${{ secrets.WIN_CERT_PFX_B64 }}
           password: ${{ secrets.WIN_CERT_PFX_PASSWORD }}
+          certificatesha1: ${{ secrets.WIN_CERT_SHA1 }}
           folder: ${{ steps.out.outputs.dist }}
           recursive: false
 
-      # Package ZIP
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -126,10 +137,8 @@ jobs:
           path: artifacts/*.zip
           include-hidden-files: true
 
-      # Pubblica su GitHub Release quando pushi un tag vX.Y.Z
-      # softprops/action-gh-release :contentReference[oaicite:2]{index=2}
       - name: Publish GitHub Release (tag only)
-        if: github.ref_type == 'tag'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*.zip
