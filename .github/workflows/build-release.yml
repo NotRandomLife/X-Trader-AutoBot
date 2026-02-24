@@ -21,29 +21,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.10 (all OS)
+      # Windows + Linux: setup-python
+      - name: Setup Python 3.10 (Windows/Linux)
+        if: runner.os != 'macOS'
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          architecture: "x64"
           cache: "pip"
           cache-dependency-path: |
             X_Trader_AutoBot/requirements.txt
 
-      - name: Linux deps (Tk)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tk-dev tcl-dev
-
-      - name: macOS deps (Tcl/Tk + gettext)
+      # macOS: brew python@3.10 + tcl-tk, e shims python/pip per forzare la toolchain corretta
+      - name: Setup Python 3.10 (macOS via Homebrew)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -e
           brew update
-          brew install tcl-tk gettext
+          brew install python@3.10 tcl-tk gettext
+
+          PY_PREFIX="$(brew --prefix python@3.10)"
           TCLTK_PREFIX="$(brew --prefix tcl-tk)"
+
+          echo "$PY_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "$TCLTK_PREFIX/bin" >> "$GITHUB_PATH"
+
+          # Env per tkinter (runtime) + per Nuitka plugin tk-inter
+          echo "TCL_LIBRARY=$TCLTK_PREFIX/lib/tcl8.6" >> "$GITHUB_ENV"
+          echo "TK_LIBRARY=$TCLTK_PREFIX/lib/tk8.6" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$TCLTK_PREFIX/lib:/usr/local/lib:/usr/lib" >> "$GITHUB_ENV"
           echo "TCLTK_PREFIX=$TCLTK_PREFIX" >> "$GITHUB_ENV"
+
+          # Shims perché Nuitka/build usa 'python'/'pip'
+          SHIM_DIR="$RUNNER_TEMP/py310shim"
+          mkdir -p "$SHIM_DIR"
+          cat > "$SHIM_DIR/python" <<'EOF'
+          #!/bin/bash
+          exec python3.10 "$@"
+          EOF
+          cat > "$SHIM_DIR/pip" <<'EOF'
+          #!/bin/bash
+          exec python3.10 -m pip "$@"
+          EOF
+          chmod +x "$SHIM_DIR/python" "$SHIM_DIR/pip"
+          echo "$SHIM_DIR" >> "$GITHUB_PATH"
+
+          python -V
+          pip -V
           python -c "import tkinter; print('tkinter OK, TkVersion=', tkinter.TkVersion)"
 
       - name: Compute Version (for Windows metadata)
@@ -62,6 +87,12 @@ jobs:
           WIN_VER="$A.$B.$C.0"
           echo "win=$WIN_VER" >> "$GITHUB_OUTPUT"
 
+      - name: Linux deps (Tk)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tk-dev tcl-dev
+
       - name: Install dependencies + Nuitka
         working-directory: X_Trader_AutoBot
         shell: bash
@@ -70,6 +101,7 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
           pip install "nuitka==2.8"
+          # macOS: serve per convertire PNG -> icns automaticamente
           if [ "$RUNNER_OS" = "macOS" ]; then
             pip install imageio
           fi
@@ -124,31 +156,16 @@ jobs:
         shell: bash
         run: |
           set -e
-          python -m nuitka \
-            app.pyw \
-            --mode=app-dist \
-            --enable-plugin=tk-inter \
-            --include-data-dir=assets=assets \
-            --assume-yes-for-downloads \
-            --output-dir=build
+          python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build
 
-      - name: Build (macOS) - Nuitka app-dist (.app) (explicit Tcl/Tk dirs)
+      - name: Build (macOS) - Nuitka app-dist (.app)
         if: runner.os == 'macOS'
         working-directory: X_Trader_AutoBot
         shell: bash
         run: |
           set -e
           : "${TCLTK_PREFIX:?TCLTK_PREFIX not set}"
-          python -m nuitka \
-            app.pyw \
-            --mode=app-dist \
-            --enable-plugin=tk-inter \
-            --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6" \
-            --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6" \
-            --include-data-dir=assets=assets \
-            --assume-yes-for-downloads \
-            --output-dir=build \
-            --macos-app-icon=assets/xtrader_icon.png
+          python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6"             --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6"             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build             --macos-app-icon=assets/xtrader_icon.png
 
       - name: Locate dist/app
         id: out
@@ -213,6 +230,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
-
           files: artifacts/*.zip
