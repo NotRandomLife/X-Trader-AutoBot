@@ -32,8 +32,8 @@ jobs:
           cache-dependency-path: |
             X_Trader_AutoBot/requirements.txt
 
-      # macOS: usa Homebrew python@3.10 per evitare crash ensurepip/libintl su runner recenti
-      - name: Setup Python (macOS via Homebrew)
+      # macOS: Homebrew python@3.10 + shim per forzare 'python' e 'pip' su 3.10
+      - name: Setup Python (macOS via Homebrew + shims)
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -41,9 +41,26 @@ jobs:
           brew update
           brew install python@3.10
           PY_PREFIX="$(brew --prefix python@3.10)"
+
+          # Preferisci python3.10 e pip3.10
           echo "$PY_PREFIX/bin" >> "$GITHUB_PATH"
-          python3.10 -V
-          python3.10 -m pip -V
+
+          # Crea shim 'python' e 'pip' perché Nuitka-Action usa 'python'/'pip'
+          SHIM_DIR="$RUNNER_TEMP/py310shim"
+          mkdir -p "$SHIM_DIR"
+          cat > "$SHIM_DIR/python" <<'EOF'
+          #!/bin/bash
+          exec python3.10 "$@"
+          EOF
+          cat > "$SHIM_DIR/pip" <<'EOF'
+          #!/bin/bash
+          exec python3.10 -m pip "$@"
+          EOF
+          chmod +x "$SHIM_DIR/python" "$SHIM_DIR/pip"
+          echo "$SHIM_DIR" >> "$GITHUB_PATH"
+
+          python -V
+          pip -V
 
       - name: Compute Version (for Windows metadata)
         id: ver
@@ -74,6 +91,10 @@ jobs:
           set -e
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
+          # macOS: serve per convertire PNG->icns (Nuitka)
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            pip install imageio
+          fi
 
       - name: Make Windows icon (.ico)
         if: runner.os == 'Windows'
@@ -143,13 +164,13 @@ jobs:
         run: |
           set -e
           if [ "$RUNNER_OS" = "macOS" ]; then
-            APP="$(find X_Trader_AutoBot -maxdepth 5 -type d -name '*.app' | head -n 1 || true)"
+            APP="$(find X_Trader_AutoBot -maxdepth 6 -type d -name '*.app' | head -n 1 || true)"
             if [ -z "$APP" ]; then
               echo "No .app found"; exit 1
             fi
             echo "app=$APP" >> $GITHUB_OUTPUT
           else
-            DIST="$(find X_Trader_AutoBot -maxdepth 5 -type d -name '*.dist' | head -n 1 || true)"
+            DIST="$(find X_Trader_AutoBot -maxdepth 6 -type d -name '*.dist' | head -n 1 || true)"
             if [ -z "$DIST" ]; then
               echo "No .dist found"; exit 1
             fi
@@ -222,6 +243,11 @@ jobs:
           include-hidden-files: true
 
       - name: Publish GitHub Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
