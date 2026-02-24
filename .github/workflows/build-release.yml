@@ -21,56 +21,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Windows + Linux: setup-python (stabile)
-      - name: Setup Python (Windows/Linux)
-        if: runner.os != 'macOS'
+      - name: Setup Python 3.10 (all OS)
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          architecture: "x64"
           cache: "pip"
           cache-dependency-path: |
             X_Trader_AutoBot/requirements.txt
 
-      # macOS: Homebrew python@3.10 + Tcl/Tk + shims per forzare 'python'/'pip' su 3.10
-      - name: Setup Python (macOS via Homebrew + Tcl/Tk + shims)
+      - name: Linux deps (Tk)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tk-dev tcl-dev
+
+      - name: macOS deps (Tcl/Tk + gettext)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -e
           brew update
-          brew install python@3.10 tcl-tk
-
-          PY_PREFIX="$(brew --prefix python@3.10)"
+          brew install tcl-tk gettext
           TCLTK_PREFIX="$(brew --prefix tcl-tk)"
-
-          # Preferisci python3.10 e pip3.10
-          echo "$PY_PREFIX/bin" >> "$GITHUB_PATH"
-
-          # Persist env for Tk runtime/linking (tkinter import in CI)
-          echo "TCL_LIBRARY=$TCLTK_PREFIX/lib/tcl8.6" >> "$GITHUB_ENV"
-          echo "TK_LIBRARY=$TCLTK_PREFIX/lib/tk8.6" >> "$GITHUB_ENV"
-          echo "DYLD_FALLBACK_LIBRARY_PATH=$TCLTK_PREFIX/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> "$GITHUB_ENV"
-          echo "$TCLTK_PREFIX/bin" >> "$GITHUB_PATH"
-
-          # Crea shim 'python' e 'pip' perché la pipeline usa 'python'/'pip'
-          SHIM_DIR="$RUNNER_TEMP/py310shim"
-          mkdir -p "$SHIM_DIR"
-          cat > "$SHIM_DIR/python" <<'EOF'
-          #!/bin/bash
-          exec python3.10 "$@"
-          EOF
-          cat > "$SHIM_DIR/pip" <<'EOF'
-          #!/bin/bash
-          exec python3.10 -m pip "$@"
-          EOF
-          chmod +x "$SHIM_DIR/python" "$SHIM_DIR/pip"
-          echo "$SHIM_DIR" >> "$GITHUB_PATH"
-
-          python -V
-          pip -V
-
-          # Sanity check: tkinter must import, otherwise Nuitka tk-inter plugin will fail
+          echo "TCLTK_PREFIX=$TCLTK_PREFIX" >> "$GITHUB_ENV"
           python -c "import tkinter; print('tkinter OK, TkVersion=', tkinter.TkVersion)"
 
       - name: Compute Version (for Windows metadata)
@@ -89,12 +62,6 @@ jobs:
           WIN_VER="$A.$B.$C.0"
           echo "win=$WIN_VER" >> "$GITHUB_OUTPUT"
 
-      - name: Linux deps (Tk)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tk-dev tcl-dev
-
       - name: Install dependencies + Nuitka
         working-directory: X_Trader_AutoBot
         shell: bash
@@ -104,7 +71,6 @@ jobs:
           pip install -r requirements.txt
           pip install "nuitka==2.8"
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # Serve per convertire PNG -> icns automaticamente (Nuitka)
             pip install imageio
           fi
 
@@ -166,16 +132,19 @@ jobs:
             --assume-yes-for-downloads \
             --output-dir=build
 
-      - name: Build (macOS) - Nuitka app-dist (.app)
+      - name: Build (macOS) - Nuitka app-dist (.app) (explicit Tcl/Tk dirs)
         if: runner.os == 'macOS'
         working-directory: X_Trader_AutoBot
         shell: bash
         run: |
           set -e
+          : "${TCLTK_PREFIX:?TCLTK_PREFIX not set}"
           python -m nuitka \
             app.pyw \
             --mode=app-dist \
             --enable-plugin=tk-inter \
+            --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6" \
+            --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6" \
             --include-data-dir=assets=assets \
             --assume-yes-for-downloads \
             --output-dir=build \
@@ -199,31 +168,6 @@ jobs:
             fi
             echo "dist=$DIST" >> $GITHUB_OUTPUT
           fi
-
-      - name: Detect Windows signing config
-        id: signcfg
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          WIN_CERT_PFX_B64: ${{ secrets.WIN_CERT_PFX_B64 }}
-          WIN_CERT_PFX_PASSWORD: ${{ secrets.WIN_CERT_PFX_PASSWORD }}
-          WIN_CERT_SHA1: ${{ secrets.WIN_CERT_SHA1 }}
-        run: |
-          if ($env:WIN_CERT_PFX_B64 -and $env:WIN_CERT_PFX_PASSWORD -and $env:WIN_CERT_SHA1) {
-            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } else {
-            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
-
-      - name: Sign Windows EXE/DLL (optional, tag only)
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v') && steps.signcfg.outputs.enabled == 'true'
-        uses: sauravkumarsahoo/sign-files-with-pfx@v1
-        with:
-          certificate: ${{ secrets.WIN_CERT_PFX_B64 }}
-          password: ${{ secrets.WIN_CERT_PFX_PASSWORD }}
-          certificatesha1: ${{ secrets.WIN_CERT_SHA1 }}
-          folder: ${{ steps.out.outputs.dist }}
-          recursive: false
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -269,4 +213,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          files: artifacts/*.zip
+
           files: artifacts/*.zip
