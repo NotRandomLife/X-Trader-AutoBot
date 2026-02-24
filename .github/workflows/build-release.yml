@@ -32,7 +32,7 @@ jobs:
           cache-dependency-path: |
             X_Trader_AutoBot/requirements.txt
 
-      # macOS: Homebrew python@3.10 + shim per forzare 'python' e 'pip' su 3.10
+      # macOS: Homebrew python@3.10 + shims per forzare 'python'/'pip' su 3.10 (evita usare python 3.14 di sistema)
       - name: Setup Python (macOS via Homebrew + shims)
         if: runner.os == 'macOS'
         shell: bash
@@ -41,11 +41,8 @@ jobs:
           brew update
           brew install python@3.10
           PY_PREFIX="$(brew --prefix python@3.10)"
-
-          # Preferisci python3.10 e pip3.10
           echo "$PY_PREFIX/bin" >> "$GITHUB_PATH"
 
-          # Crea shim 'python' e 'pip' perché Nuitka-Action usa 'python'/'pip'
           SHIM_DIR="$RUNNER_TEMP/py310shim"
           mkdir -p "$SHIM_DIR"
           cat > "$SHIM_DIR/python" <<'EOF'
@@ -84,17 +81,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tk-dev tcl-dev
 
-      - name: Install dependencies
+      - name: Install dependencies + Nuitka
         working-directory: X_Trader_AutoBot
         shell: bash
         run: |
           set -e
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          # macOS: serve per convertire PNG->icns (Nuitka)
+          pip install "nuitka==2.8"
           if [ "$RUNNER_OS" = "macOS" ]; then
+            # Serve per convertire PNG -> icns automaticamente
             pip install imageio
           fi
+
+      - name: Set Nuitka cache dir (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Join-Path $env:RUNNER_TEMP "nuitka_cache"
+          New-Item -ItemType Directory -Force -Path $p | Out-Null
+          "NUITKA_CACHE_DIR=$p" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Set Nuitka cache dir (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/nuitka_cache"
+          echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka_cache" >> "$GITHUB_ENV"
 
       - name: Make Windows icon (.ico)
         if: runner.os == 'Windows'
@@ -104,59 +118,54 @@ jobs:
           pip install pillow
           python -c "from PIL import Image; img=Image.open('assets/xtrader_icon.png').convert('RGBA'); img.save('assets/xtrader.ico', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
 
-      - name: Build (Windows)
+      - name: Build (Windows) - Nuitka app-dist (onedir)
         if: runner.os == 'Windows'
-        uses: Nuitka/Nuitka-Action@main
-        with:
-          working-directory: X_Trader_AutoBot
-          nuitka-version: "2.8"
-          script-name: app.pyw
-          mode: app-dist
-          enable-plugins: |
-            tk-inter
-            matplotlib
-          include-data-dir: |
-            assets=assets
-          windows-console-mode: disable
-          windows-icon-from-ico: assets/xtrader.ico
-          company-name: X-Trader
-          product-name: X-Trader AutoBot
-          file-description: X-Trader AutoBot
-          file-version: ${{ steps.ver.outputs.win }}
-          product-version: ${{ steps.ver.outputs.win }}
+        working-directory: X_Trader_AutoBot
+        shell: pwsh
+        run: |
+          python -m nuitka `
+            app.pyw `
+            --mode=app-dist `
+            --enable-plugin=tk-inter `
+            --include-data-dir=assets=assets `
+            --assume-yes-for-downloads `
+            --output-dir=build `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=assets\xtrader.ico `
+            --company-name="X-Trader" `
+            --product-name="X-Trader AutoBot" `
+            --file-description="X-Trader AutoBot" `
+            --file-version="${{ steps.ver.outputs.win }}" `
+            --product-version="${{ steps.ver.outputs.win }}"
 
-      - name: Build (Linux)
+      - name: Build (Linux) - Nuitka app-dist (onedir)
         if: runner.os == 'Linux'
-        uses: Nuitka/Nuitka-Action@main
-        with:
-          working-directory: X_Trader_AutoBot
-          nuitka-version: "2.8"
-          script-name: app.pyw
-          mode: app-dist
-          enable-plugins: |
-            tk-inter
-            matplotlib
-          include-data-dir: |
-            assets=assets
-          company-name: X-Trader
-          product-name: X-Trader AutoBot
+        working-directory: X_Trader_AutoBot
+        shell: bash
+        run: |
+          set -e
+          python -m nuitka \
+            app.pyw \
+            --mode=app-dist \
+            --enable-plugin=tk-inter \
+            --include-data-dir=assets=assets \
+            --assume-yes-for-downloads \
+            --output-dir=build
 
-      - name: Build (macOS)
+      - name: Build (macOS) - Nuitka app-dist (.app)
         if: runner.os == 'macOS'
-        uses: Nuitka/Nuitka-Action@main
-        with:
-          working-directory: X_Trader_AutoBot
-          nuitka-version: "2.8"
-          script-name: app.pyw
-          mode: app-dist
-          enable-plugins: |
-            tk-inter
-            matplotlib
-          include-data-dir: |
-            assets=assets
-          macos-app-icon: assets/xtrader_icon.png
-          company-name: X-Trader
-          product-name: X-Trader AutoBot
+        working-directory: X_Trader_AutoBot
+        shell: bash
+        run: |
+          set -e
+          python -m nuitka \
+            app.pyw \
+            --mode=app-dist \
+            --enable-plugin=tk-inter \
+            --include-data-dir=assets=assets \
+            --assume-yes-for-downloads \
+            --output-dir=build \
+            --macos-app-icon=assets/xtrader_icon.png
 
       - name: Locate dist/app
         id: out
