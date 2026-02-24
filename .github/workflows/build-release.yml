@@ -14,7 +14,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -74,7 +73,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -125,9 +123,9 @@ jobs:
           python-version: "3.10"
           architecture: "arm64"
 
-      - name: Tcl/Tk + icon (.icns)
-        working-directory: X_Trader_AutoBot
+      - name: Install Tcl/Tk + verify paths
         shell: bash
+        working-directory: X_Trader_AutoBot
         run: |
           set -e
           brew update
@@ -137,6 +135,12 @@ jobs:
           echo "TCL_LIBRARY=$TCLTK_PREFIX/lib/tcl8.6" >> "$GITHUB_ENV"
           echo "TK_LIBRARY=$TCLTK_PREFIX/lib/tk8.6" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$TCLTK_PREFIX/lib:/usr/local/lib:/usr/lib" >> "$GITHUB_ENV"
+
+          echo "TCLTK_PREFIX=$TCLTK_PREFIX"
+          ls -la "$TCLTK_PREFIX/lib" | head -n 200
+          test -d "$TCLTK_PREFIX/lib/tcl8.6"
+          test -d "$TCLTK_PREFIX/lib/tk8.6"
+
           python -c "import tkinter; print('tkinter OK, TkVersion=', tkinter.TkVersion)"
 
           ICON_PNG="assets/xtrader_icon.png"
@@ -168,11 +172,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nuitka_cache"
           echo "NUITKA_CACHE_DIR=$RUNNER_TEMP/nuitka_cache" >> "$GITHUB_ENV"
 
-      - name: Build (macOS .app)
+      - name: Build (macOS .app) - explicit Tcl/Tk dirs
         working-directory: X_Trader_AutoBot
         shell: bash
         run: |
           set -e
+          : "${TCLTK_PREFIX:?TCLTK_PREFIX not set}"
           python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6"             --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6"             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build             --macos-app-icon=assets/xtrader.icns
 
       - name: Zip
