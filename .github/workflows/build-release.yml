@@ -20,11 +20,12 @@ jobs:
           python-version: "3.10"
           architecture: "x64"
 
-      - name: Install deps
+      - name: Install deps (pin setuptools)
         working-directory: X_Trader_AutoBot
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip wheel
+          pip install "setuptools==81.0.0"
           pip install -r requirements.txt
           pip install "nuitka==2.8" pillow
 
@@ -83,10 +84,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tk-dev tcl-dev zip
 
-      - name: Install deps
+      - name: Install deps (pin setuptools)
         working-directory: X_Trader_AutoBot
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip wheel
+          pip install "setuptools==81.0.0"
           pip install -r requirements.txt
           pip install "nuitka==2.8"
 
@@ -98,13 +100,7 @@ jobs:
       - name: Build (Linux OneDir)
         working-directory: X_Trader_AutoBot
         run: |
-          python -m nuitka \
-            app.pyw \
-            --mode=app-dist \
-            --enable-plugin=tk-inter \
-            --include-data-dir=assets=assets \
-            --assume-yes-for-downloads \
-            --output-dir=build
+          python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build
 
       - name: Zip
         working-directory: X_Trader_AutoBot
@@ -155,12 +151,13 @@ jobs:
           iconutil -c icns "$ICONSET_DIR" -o "$ICNS_OUT"
           test -f "$ICNS_OUT"
 
-      - name: Install deps
+      - name: Install deps (pin setuptools)
         working-directory: X_Trader_AutoBot
         shell: bash
         run: |
           set -e
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip wheel
+          pip install "setuptools==81.0.0"
           pip install -r requirements.txt
           pip install "nuitka==2.8"
 
@@ -176,16 +173,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          python -m nuitka \
-            app.pyw \
-            --mode=app-dist \
-            --enable-plugin=tk-inter \
-            --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6" \
-            --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6" \
-            --include-data-dir=assets=assets \
-            --assume-yes-for-downloads \
-            --output-dir=build \
-            --macos-app-icon=assets/xtrader.icns
+          python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6"             --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6"             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build             --macos-app-icon=assets/xtrader.icns
 
       - name: Zip
         working-directory: X_Trader_AutoBot
