@@ -32,17 +32,28 @@ jobs:
           cache-dependency-path: |
             X_Trader_AutoBot/requirements.txt
 
-      # macOS: Homebrew python@3.10 + shims per forzare 'python'/'pip' su 3.10 (evita usare python 3.14 di sistema)
-      - name: Setup Python (macOS via Homebrew + shims)
+      # macOS: Homebrew python@3.10 + Tcl/Tk + shims per forzare 'python'/'pip' su 3.10
+      - name: Setup Python (macOS via Homebrew + Tcl/Tk + shims)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -e
           brew update
-          brew install python@3.10
+          brew install python@3.10 tcl-tk
+
           PY_PREFIX="$(brew --prefix python@3.10)"
+          TCLTK_PREFIX="$(brew --prefix tcl-tk)"
+
+          # Preferisci python3.10 e pip3.10
           echo "$PY_PREFIX/bin" >> "$GITHUB_PATH"
 
+          # Persist env for Tk runtime/linking (tkinter import in CI)
+          echo "TCL_LIBRARY=$TCLTK_PREFIX/lib/tcl8.6" >> "$GITHUB_ENV"
+          echo "TK_LIBRARY=$TCLTK_PREFIX/lib/tk8.6" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$TCLTK_PREFIX/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "$TCLTK_PREFIX/bin" >> "$GITHUB_PATH"
+
+          # Crea shim 'python' e 'pip' perché la pipeline usa 'python'/'pip'
           SHIM_DIR="$RUNNER_TEMP/py310shim"
           mkdir -p "$SHIM_DIR"
           cat > "$SHIM_DIR/python" <<'EOF'
@@ -58,6 +69,9 @@ jobs:
 
           python -V
           pip -V
+
+          # Sanity check: tkinter must import, otherwise Nuitka tk-inter plugin will fail
+          python -c "import tkinter; print('tkinter OK, TkVersion=', tkinter.TkVersion)"
 
       - name: Compute Version (for Windows metadata)
         id: ver
@@ -90,7 +104,7 @@ jobs:
           pip install -r requirements.txt
           pip install "nuitka==2.8"
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # Serve per convertire PNG -> icns automaticamente
+            # Serve per convertire PNG -> icns automaticamente (Nuitka)
             pip install imageio
           fi
 
