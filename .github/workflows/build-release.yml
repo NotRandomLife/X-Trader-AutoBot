@@ -21,7 +21,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      # Windows + Linux: usa setup-python (stabile e veloce)
+      - name: Setup Python (Windows/Linux)
+        if: runner.os != 'macOS'
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -29,6 +31,19 @@ jobs:
           cache: "pip"
           cache-dependency-path: |
             X_Trader_AutoBot/requirements.txt
+
+      # macOS: evita setup-python x64 (errore libintl/ensurepip su runner recenti) e usa brew python@3.10
+      - name: Setup Python (macOS via Homebrew)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -e
+          brew update
+          brew install python@3.10
+          PY_PREFIX="$(brew --prefix python@3.10)"
+          echo "$PY_PREFIX/bin" >> "$GITHUB_PATH"
+          python3.10 -V
+          python3.10 -m pip -V
 
       - name: Linux deps (Tk)
         if: runner.os == 'Linux'
@@ -38,8 +53,10 @@ jobs:
 
       - name: Install dependencies
         working-directory: X_Trader_AutoBot
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
+          set -e
+          python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
 
       - name: Make Windows icon (.ico)
@@ -69,20 +86,27 @@ jobs:
           product-name: X-Trader AutoBot
           file-description: X-Trader AutoBot
 
+      # Trova output in modo robusto (dipende dalla versione Nuitka/Action)
       - name: Locate dist/app
         id: out
         shell: bash
         run: |
           set -e
           if [ "$RUNNER_OS" = "macOS" ]; then
-            APP="$(ls -d X_Trader_AutoBot/build/*.app | head -n 1 || true)"
+            APP="$(find X_Trader_AutoBot -maxdepth 4 -type d -name '*.app' | head -n 1 || true)"
+            if [ -z "$APP" ]; then
+              echo "No .app found"; exit 1
+            fi
             echo "app=$APP" >> $GITHUB_OUTPUT
           else
-            DIST="$(ls -d X_Trader_AutoBot/build/*.dist | head -n 1 || true)"
+            DIST="$(find X_Trader_AutoBot -maxdepth 4 -type d -name '*.dist' | head -n 1 || true)"
+            if [ -z "$DIST" ]; then
+              echo "No .dist found"; exit 1
+            fi
             echo "dist=$DIST" >> $GITHUB_OUTPUT
           fi
 
-      # Decide se la firma è configurata (senza usare 'secrets' nella condizione if)
+      # Step che decide se la firma è configurata (senza usare 'secrets' nella condizione if)
       - name: Detect Windows signing config
         id: signcfg
         if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
@@ -114,20 +138,31 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           $dist = "${{ steps.out.outputs.dist }}"
+          if (-not (Test-Path $dist)) { Write-Error "DIST not found: $dist"; exit 1 }
           Compress-Archive -Path $dist -DestinationPath artifacts\X-Trader_AutoBot-windows.zip -Force
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
+          set -e
           mkdir -p artifacts
           DIST="${{ steps.out.outputs.dist }}"
+          if [ ! -d "$DIST" ]; then
+            echo "DIST not found: $DIST"; exit 1
+          fi
           (cd "$(dirname "$DIST")" && zip -r "../../artifacts/X-Trader_AutoBot-linux.zip" "$(basename "$DIST")")
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
+          set -e
           mkdir -p artifacts
           APP="${{ steps.out.outputs.app }}"
+          if [ ! -d "$APP" ]; then
+            echo "APP not found: $APP"; exit 1
+          fi
           ditto -c -k --keepParent "$APP" "artifacts/X-Trader_AutoBot-macos.zip"
 
       - name: Upload workflow artifacts
