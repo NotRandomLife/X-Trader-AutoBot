@@ -14,6 +14,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -73,6 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -123,26 +125,47 @@ jobs:
           python-version: "3.10"
           architecture: "arm64"
 
-      - name: Install Tcl/Tk + verify paths
+      - name: Install Tcl/Tk + resolve Tcl/Tk dirs + make .icns
         shell: bash
         working-directory: X_Trader_AutoBot
         run: |
           set -e
           brew update
           brew install tcl-tk
+
           TCLTK_PREFIX="$(brew --prefix tcl-tk)"
           echo "TCLTK_PREFIX=$TCLTK_PREFIX" >> "$GITHUB_ENV"
-          echo "TCL_LIBRARY=$TCLTK_PREFIX/lib/tcl8.6" >> "$GITHUB_ENV"
-          echo "TK_LIBRARY=$TCLTK_PREFIX/lib/tk8.6" >> "$GITHUB_ENV"
+
+          # Homebrew tcl-tk is currently 9.x on macOS runners -> uses tcl9.0 / tk9.0 dirs.
+          TCL_DIR=""
+          for cand in "$TCLTK_PREFIX/lib/tcl9.0" "$TCLTK_PREFIX/lib/tcl8.6" "$TCLTK_PREFIX/lib/tcl8.5"; do
+            if [ -d "$cand" ]; then TCL_DIR="$cand"; break; fi
+          done
+
+          TK_DIR=""
+          for cand in "$TCLTK_PREFIX/lib/tk9.0" "$TCLTK_PREFIX/lib/tk8.6" "$TCLTK_PREFIX/lib/tk8.5"; do
+            if [ -d "$cand" ]; then TK_DIR="$cand"; break; fi
+          done
+
+          if [ -z "$TCL_DIR" ] || [ -z "$TK_DIR" ]; then
+            echo "ERROR: Tcl/Tk dirs not found under $TCLTK_PREFIX/lib"
+            ls -la "$TCLTK_PREFIX/lib" | head -n 250
+            exit 1
+          fi
+
+          echo "TCL_DIR=$TCL_DIR" >> "$GITHUB_ENV"
+          echo "TK_DIR=$TK_DIR" >> "$GITHUB_ENV"
+          echo "TCL_LIBRARY=$TCL_DIR" >> "$GITHUB_ENV"
+          echo "TK_LIBRARY=$TK_DIR" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=$TCLTK_PREFIX/lib:/usr/local/lib:/usr/lib" >> "$GITHUB_ENV"
 
           echo "TCLTK_PREFIX=$TCLTK_PREFIX"
-          ls -la "$TCLTK_PREFIX/lib" | head -n 200
-          test -d "$TCLTK_PREFIX/lib/tcl8.6"
-          test -d "$TCLTK_PREFIX/lib/tk8.6"
+          echo "TCL_DIR=$TCL_DIR"
+          echo "TK_DIR=$TK_DIR"
 
           python -c "import tkinter; print('tkinter OK, TkVersion=', tkinter.TkVersion)"
 
+          # Build .icns from PNG (no Python deps needed)
           ICON_PNG="assets/xtrader_icon.png"
           ICONSET_DIR="$RUNNER_TEMP/xtrader.iconset"
           ICNS_OUT="assets/xtrader.icns"
@@ -177,8 +200,9 @@ jobs:
         shell: bash
         run: |
           set -e
-          : "${TCLTK_PREFIX:?TCLTK_PREFIX not set}"
-          python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --tcl-library-dir="$TCLTK_PREFIX/lib/tcl8.6"             --tk-library-dir="$TCLTK_PREFIX/lib/tk8.6"             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build             --macos-app-icon=assets/xtrader.icns
+          : "${TCL_DIR:?TCL_DIR not set}"
+          : "${TK_DIR:?TK_DIR not set}"
+          python -m nuitka             app.pyw             --mode=app-dist             --enable-plugin=tk-inter             --tcl-library-dir="$TCL_DIR"             --tk-library-dir="$TK_DIR"             --include-data-dir=assets=assets             --assume-yes-for-downloads             --output-dir=build             --macos-app-icon=assets/xtrader.icns
 
       - name: Zip
         working-directory: X_Trader_AutoBot
@@ -215,3 +239,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*.zip
+
