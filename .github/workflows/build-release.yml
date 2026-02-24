@@ -1,0 +1,135 @@
+name: Build & Release (Nuitka app-dist)
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          architecture: "x64"
+          cache: "pip"
+          cache-dependency-path: |
+            X_Trader_AutoBot/requirements.txt
+
+      - name: Linux deps (Tk)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tk-dev tcl-dev
+
+      - name: Install dependencies
+        working-directory: X_Trader_AutoBot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Crea .ico da png per Windows EXE icon
+      - name: Make Windows icon (.ico)
+        if: runner.os == 'Windows'
+        working-directory: X_Trader_AutoBot
+        shell: pwsh
+        run: |
+          pip install pillow
+          python -c "from PIL import Image; img=Image.open('assets/xtrader_icon.png').convert('RGBA'); img.save('assets/xtrader.ico', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
+
+      # BUILD con Nuitka-Action (mode=app-dist: standalone folder su Win/Linux, app bundle su macOS)
+      - name: Build (Nuitka app-dist)
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          working-directory: X_Trader_AutoBot
+          nuitka-version: "2.8"
+          script-name: app.pyw
+          mode: app-dist
+          enable-plugins: |
+            tk-inter
+            matplotlib
+          include-data-dir: |
+            assets=assets
+          windows-console-mode: disable
+          windows-icon-from-ico: assets/xtrader.ico
+          macos-app-icon: assets/xtrader_icon.png
+          company-name: X-Trader
+          product-name: X-Trader AutoBot
+          file-description: X-Trader AutoBot
+
+      # Individua output
+      - name: Locate dist/app
+        id: out
+        shell: bash
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            APP="$(ls -d X_Trader_AutoBot/build/*.app | head -n 1 || true)"
+            echo "app=$APP" >> $GITHUB_OUTPUT
+          else
+            DIST="$(ls -d X_Trader_AutoBot/build/*.dist | head -n 1 || true)"
+            echo "dist=$DIST" >> $GITHUB_OUTPUT
+          fi
+
+      # (OPZIONALE) Windows code signing - solo se hai impostato i secrets
+      # Usa un action basato su signtool e PFX base64 (Windows runner only). :contentReference[oaicite:1]{index=1}
+      - name: Sign Windows EXE (optional)
+        if: runner.os == 'Windows' && github.ref_type == 'tag' && secrets.WIN_CERT_PFX_B64 != '' && secrets.WIN_CERT_PFX_PASSWORD != ''
+        uses: signpath/github-action-sign-files-with-pfx@v1
+        with:
+          certificate: ${{ secrets.WIN_CERT_PFX_B64 }}
+          password: ${{ secrets.WIN_CERT_PFX_PASSWORD }}
+          folder: ${{ steps.out.outputs.dist }}
+          recursive: false
+
+      # Package ZIP
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $dist = "${{ steps.out.outputs.dist }}"
+          Compress-Archive -Path $dist -DestinationPath artifacts\X-Trader_AutoBot-windows.zip -Force
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p artifacts
+          DIST="${{ steps.out.outputs.dist }}"
+          (cd "$(dirname "$DIST")" && zip -r "../../artifacts/X-Trader_AutoBot-linux.zip" "$(basename "$DIST")")
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p artifacts
+          APP="${{ steps.out.outputs.app }}"
+          ditto -c -k --keepParent "$APP" "artifacts/X-Trader_AutoBot-macos.zip"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-X-Trader_AutoBot
+          path: artifacts/*.zip
+          include-hidden-files: true
+
+      # Pubblica su GitHub Release quando pushi un tag vX.Y.Z
+      # softprops/action-gh-release :contentReference[oaicite:2]{index=2}
+      - name: Publish GitHub Release (tag only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
