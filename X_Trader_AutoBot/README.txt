@@ -1,18 +1,22 @@
 X-Trader AutoBot (Desktop)
 
-Cosa fa
-- Legge il segnale del sito come la pagina web: https://x-trader.cloud/latest.json
-- Esegue ordini Binance Margin + SL/TP usando i parametri della GUI.
-- Prefetch maxBorrowable 10s prima del boundary 5m e applica safety -leverage%.
+What it does
+- Reads the site signal (same as the website): https://x-trader.cloud/latest.json
+- Executes Binance Margin orders + SL/TP using the GUI parameters.
+- Prefetches maxBorrowable ~10s before the 5m boundary and applies Safety% (subtracts from maxBorrowable).
 
-"SITO: CONNESSO"
-- Significa che l'ultima lettura di latest.json è OK negli ultimi 5 secondi.
-- Se il sito è offline o la rete è KO, resta NON CONNESSO e non esegue trade.
+"SERVER: ONLINE"
+- Means the latest.json read succeeded within the last ~5 seconds.
+- If the site is offline or network is down, it stays OFFLINE and will not trade.
 
-Avvio (Windows)
+Registration / License
+- Trading is enabled only with an **active license key**.
+- If the key is used on multiple machines at the same time, the server blocks the license.
+
+Run (Windows)
 1) pip install -r requirements.txt
 2) python app.pyw
-3) Premi START (ARMED)
+3) Press START (ARMED)
 
-Note
-- Le API/Secret restano SOLO nella app desktop (mai nel sito).
+Notes
+- API Key / Secret stay ONLY inside the desktop app (never on the website).

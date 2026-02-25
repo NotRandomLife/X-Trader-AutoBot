@@ -109,7 +109,7 @@ class SignalPoller:
                 # Se fallisce, prova fallback endpoint
                 self._next_endpoint()
 
-                # non spammo: log ogni ~5s in errore continuo
+                # avoid spam: log every ~5s during continuous errors
                 if int(time.time()) % 5 == 0:
                     endpoint = self._endpoints[self._active_idx] if self._endpoints else "?"
                     self._log(f"⚠️ SignalPoller ERR: {e} (switch -> {endpoint})")

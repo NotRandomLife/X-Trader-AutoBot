@@ -36,7 +36,7 @@ try:
     import time
     import requests
 except Exception as e:
-    _fatal("Tkinter non disponibile o errore import.\n\nDettaglio: " + str(e) + "\n\nInstalla Python con Tcl/Tk (Windows installer).")
+    _fatal("Tkinter not available or import error.\n\nDetails: " + str(e) + "\n\nInstall Python with Tcl/Tk support (Windows installer).")
     raise
 
 from datetime import datetime
@@ -48,6 +48,7 @@ from settings_store import SettingsStore
 from trader_engine import TraderEngine
 from signal_poller import SignalPoller
 from emailer import EmailSender
+from license_client import LicenseClient
 
 # =========================
 #  FUTURISTIC UI THEME (match X_Trader_LogView.pyw)
@@ -76,8 +77,11 @@ APP_NAME = "X-Trader AutoBot"
 
 LOG_FILE = "XTraderAutoBot.log"
 
-# Segnale del sito (come x-trader.cloud)
+# Site signal (like x-trader.cloud)
 SITE_BASE_URL = "https://x-trader.cloud"
+
+# License server (backend) base url
+LICENSE_SERVER_URL_DEFAULT = SITE_BASE_URL + "/license"
 
 
 class App(tk.Tk):
@@ -105,7 +109,16 @@ class App(tk.Tk):
         self._settings = self._store.load()
 
 
-        # Poller segnali (come il sito): GET /api/latest (fallback /.netlify/functions/latest)
+        # License client
+        self._license = LicenseClient(
+            base_url=self._settings.get("license_server", LICENSE_SERVER_URL_DEFAULT),
+            on_log=self._log,
+            timeout=8.0,
+        )
+        self._license.configure(self._settings.get("license_key", ""))
+
+
+        # Signal poller (like the website): GET /api/latest (fallback /.netlify/functions/latest)
         self._poller = SignalPoller(
             SITE_BASE_URL,
             on_log=self._log,
@@ -131,13 +144,13 @@ class App(tk.Tk):
         self._engine.start()
 
 
-        # Poll status -> badge SITO
+        # Poll status -> SERVER badge
         try:
             self._poll_connected = bool(self._poller.is_connected())
             if self._poll_connected:
-                self._set_badge(self.badge_site, "SITO: CONNESSO", THEME_SUCCESS)
+                self._set_badge(self.badge_site, "SERVER: ONLINE", THEME_SUCCESS)
             else:
-                self._set_badge(self.badge_site, "SITO: NON CONNESSO", THEME_WARNING)
+                self._set_badge(self.badge_site, "SERVER: OFFLINE", THEME_WARNING)
         except Exception:
             pass
 
@@ -253,9 +266,9 @@ class App(tk.Tk):
 
         tk.Label(header, text=APP_NAME, bg=THEME_BG, fg=THEME_TEXT, font=FONT_TITLE).pack(side="left")
 
-        self.badge_site = self._badge(header, "SITO: NON CONNESSO", THEME_WARNING)
+        self.badge_site = self._badge(header, "SERVER: OFFLINE", THEME_WARNING)
         self.badge_site.pack(side="right", padx=(10, 0))
-        self.badge_arm = self._badge(header, "STATO: STOP", THEME_DANGER)
+        self.badge_arm = self._badge(header, "STATUS: STOP", THEME_DANGER)
         self.badge_arm.pack(side="right", padx=(10, 0))
 
         # Body (2 columns)
@@ -296,30 +309,42 @@ class App(tk.Tk):
         self.auto_borrow_var = tk.BooleanVar(value=True)
         self.auto_repay_var = tk.BooleanVar(value=True)
 
+        # ---- License fields ----
+        self.license_server_var = tk.StringVar()
+        self.license_key_var = tk.StringVar()
+
         g = tk.Frame(self.card_trade, bg=THEME_CARD)
         g.pack(fill="x", padx=12, pady=(8, 10))
         self._labeled_entry(g, "API Key", self.api_key_var, row=0, show="•")
         self._labeled_entry(g, "API Secret", self.api_secret_var, row=1, show="•")
-        self._labeled_entry(g, "Pair (es. BTCUSDC)", self.symbol_var, row=2)
+        self._labeled_entry(g, "Pair (e.g. BTCUSDC)", self.symbol_var, row=2)
         self._labeled_entry(g, "Stop Loss %", self.sl_pct_var, row=3)
         self._labeled_entry(g, "Take Profit %", self.tp_pct_var, row=4)
-        self._labeled_entry(g, "Safety % (tolto da maxBorrowable)", self.leverage_var, row=5)
+        self._labeled_entry(g, "Safety % (subtracted from maxBorrowable)", self.leverage_var, row=5)
+
+        self._labeled_entry(g, "License Server", self.license_server_var, row=6)
+        self._labeled_entry(g, "License Key", self.license_key_var, row=7, show="•")
+
 
         row6 = tk.Frame(g, bg=THEME_CARD)
-        row6.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        row6.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         tk.Label(row6, text="Mode", bg=THEME_CARD, fg=THEME_MUTED, font=FONT_UI).pack(side="left")
         self._radio(row6, "Cross", self.margin_mode_var, "cross").pack(side="left", padx=10)
         self._radio(row6, "Isolated", self.margin_mode_var, "isolated").pack(side="left")
 
         row7 = tk.Frame(g, bg=THEME_CARD)
-        row7.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        row7.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         self._check(row7, "Auto Borrow", self.auto_borrow_var).pack(side="left")
         self._check(row7, "Auto Repay", self.auto_repay_var).pack(side="left", padx=18)
 
         # Buttons
         btns = tk.Frame(self.card_trade, bg=THEME_CARD)
         btns.pack(fill="x", padx=12, pady=(0, 12))
-        self.btn_save = self._btn(btns, "SALVA", self._save_settings)
+        self.btn_register = self._btn(btns, "REGISTER", self._open_registration)
+        self.btn_register.pack(side="left")
+        self.btn_check = self._btn(btns, "CHECK KEY", self._check_license)
+        self.btn_check.pack(side="left", padx=10)
+        self.btn_save = self._btn(btns, "SAVE", self._save_settings)
         self.btn_save.pack(side="left")
         self.btn_start = self._btn(btns, "START", self._start_trading, accent=True)
         self.btn_start.pack(side="left", padx=10)
@@ -345,7 +370,7 @@ class App(tk.Tk):
         self._check(eg, "SMTP Secure (SSL)", self.smtp_secure_var).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 6))
         self._labeled_entry(eg, "Email (login)", self.smtp_user_var, row=5)
         self._labeled_entry(eg, "Password / App Password", self.smtp_pass_var, row=6, show="•")
-        self._labeled_entry(eg, "Invia a (To)", self.mail_to_var, row=7)
+        self._labeled_entry(eg, "To (Recipient)", self.mail_to_var, row=7)
 
         ebtns = tk.Frame(self.card_email, bg=THEME_CARD)
         ebtns.pack(fill="x", padx=12, pady=(0, 12))
@@ -363,7 +388,7 @@ class App(tk.Tk):
         # Left: Action log
         lg_left = tk.Frame(lg_root, bg=THEME_CARD)
         lg_left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        tk.Label(lg_left, text="(log su file: XTraderAutoBot.log)", bg=THEME_CARD, fg=THEME_MUTED, font=FONT_SMALL).pack(anchor="w", pady=(10, 4))
+        tk.Label(lg_left, text="(log file: XTraderAutoBot.log)", bg=THEME_CARD, fg=THEME_MUTED, font=FONT_SMALL).pack(anchor="w", pady=(10, 4))
         self.txt_log = tk.Text(
             lg_left,
             bg=THEME_PANEL,
@@ -388,17 +413,17 @@ class App(tk.Tk):
         self.card_state.grid(row=0, column=0, sticky="ew", pady=(10, 10))
         self.card_state.columnconfigure(1, weight=1)
 
-        tk.Label(self.card_state, text="DECISION / POSIZIONE", bg=THEME_CARD_2, fg=THEME_TEXT, font=FONT_SMALL_B).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 6))
+        tk.Label(self.card_state, text="DECISION / POSITION", bg=THEME_CARD_2, fg=THEME_TEXT, font=FONT_SMALL_B).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 6))
 
-        tk.Label(self.card_state, text="Decisione", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+        tk.Label(self.card_state, text="Decision", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=1, column=0, sticky="w", padx=10, pady=2)
         self.lbl_decision = tk.Label(self.card_state, text="-", bg=THEME_CARD_2, fg=THEME_WARNING, font=FONT_UI_BOLD)
         self.lbl_decision.grid(row=1, column=1, sticky="e", padx=10, pady=2)
 
-        tk.Label(self.card_state, text="Azione", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+        tk.Label(self.card_state, text="Action", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=2, column=0, sticky="w", padx=10, pady=2)
         self.lbl_action = tk.Label(self.card_state, text="-", bg=THEME_CARD_2, fg=THEME_TEXT, font=FONT_UI_BOLD)
         self.lbl_action.grid(row=2, column=1, sticky="e", padx=10, pady=2)
 
-        tk.Label(self.card_state, text="Posizione (DEBT)", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=3, column=0, sticky="w", padx=10, pady=2)
+        tk.Label(self.card_state, text="Position (DEBT)", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=3, column=0, sticky="w", padx=10, pady=2)
         self.lbl_position = tk.Label(self.card_state, text="UNKNOWN", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_UI_BOLD)
         self.lbl_position.grid(row=3, column=1, sticky="e", padx=10, pady=2)
 
@@ -406,7 +431,7 @@ class App(tk.Tk):
         self.lbl_sltp = tk.Label(self.card_state, text="-", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_UI_BOLD)
         self.lbl_sltp.grid(row=4, column=1, sticky="e", padx=10, pady=2)
 
-        tk.Label(self.card_state, text="Equity stimata (Quote)", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=5, column=0, sticky="w", padx=10, pady=(2, 10))
+        tk.Label(self.card_state, text="Estimated equity (Quote)", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_SMALL).grid(row=5, column=0, sticky="w", padx=10, pady=(2, 10))
         self.lbl_equity = tk.Label(self.card_state, text="-", bg=THEME_CARD_2, fg=THEME_MUTED, font=FONT_UI_BOLD)
         self.lbl_equity.grid(row=5, column=1, sticky="e", padx=10, pady=(2, 10))
 
@@ -415,7 +440,7 @@ class App(tk.Tk):
         self.card_chart.rowconfigure(1, weight=1)
         self.card_chart.columnconfigure(0, weight=1)
 
-        tk.Label(self.card_chart, text="GRAFICO 1 GIORNO", bg=THEME_CARD_2, fg=THEME_TEXT, font=FONT_SMALL_B).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
+        tk.Label(self.card_chart, text="1-DAY CHART", bg=THEME_CARD_2, fg=THEME_TEXT, font=FONT_SMALL_B).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
 
         self._chart_canvas = None
         self._chart_fig = None
@@ -450,7 +475,7 @@ class App(tk.Tk):
             except Exception:
                 pass
         else:
-            tk.Label(self.card_chart, text="matplotlib non installato (pip install matplotlib)", bg=THEME_CARD_2, fg=THEME_WARNING, font=FONT_SMALL).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 10))
+            tk.Label(self.card_chart, text="matplotlib not installed (pip install matplotlib)", bg=THEME_CARD_2, fg=THEME_WARNING, font=FONT_SMALL).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 10))
 
     def _card(self, parent, title):
         c = tk.Frame(parent, bg=THEME_CARD, highlightthickness=1, highlightbackground=THEME_BORDER)
@@ -576,6 +601,9 @@ class App(tk.Tk):
         self.smtp_pass_var.set(s.get("smtp_pass", ""))
         self.mail_to_var.set(s.get("mail_to", ""))
 
+        self.license_server_var.set(s.get("license_server", LICENSE_SERVER_URL_DEFAULT))
+        self.license_key_var.set(s.get("license_key", ""))
+
     def _collect_ui_settings(self):
         s = {}
         s["api_key"] = self.api_key_var.get().strip()
@@ -606,6 +634,9 @@ class App(tk.Tk):
         s["mail_to"] = self.mail_to_var.get().strip()
 
 
+        s["license_server"] = self.license_server_var.get().strip() or LICENSE_SERVER_URL_DEFAULT
+        s["license_key"] = self.license_key_var.get().strip()
+
         # fixed local
         return s
 
@@ -613,21 +644,119 @@ class App(tk.Tk):
         s = self._collect_ui_settings()
         self._store.save(s)
         self._settings = s
-        self._log("✅ Settings salvati (local).")
+        self._log("✅ Settings saved (local).")
 
     def _get_runtime_settings(self):
         return self._collect_ui_settings()
 
     # --------------- Actions ---------------
+    
+    def _open_registration(self):
+        try:
+            # Open subscription page
+            url = SITE_BASE_URL + "/en/bot.html"
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _check_license(self):
+        try:
+            self._save_settings()
+        except Exception:
+            pass
+        try:
+            self._license.base_url = (self.license_server_var.get().strip() or LICENSE_SERVER_URL_DEFAULT).rstrip("/")
+            self._license.configure(self.license_key_var.get().strip())
+        except Exception:
+            pass
+
+        ok = False
+        try:
+            ok = bool(self._license.activate(version="autobot"))
+        except Exception:
+            ok = False
+
+        if ok:
+            messagebox.showinfo(APP_NAME, "✅ License OK.\n\nYou can start trading.")
+            self._log("✅ LICENSE OK: activated.")
+        else:
+            st = {}
+            try:
+                st = self._license.last_status()
+            except Exception:
+                st = {}
+            reason = st.get("reason") or "unknown"
+            messagebox.showerror(APP_NAME, "❌ License NOT valid.\n\nReason: " + str(reason))
+            self._log("❌ LICENSE NOT valid: " + str(reason))
     def _start_trading(self):
         self._save_settings()
+
+        # License gate
+        try:
+            self._license.base_url = (self.license_server_var.get().strip() or LICENSE_SERVER_URL_DEFAULT).rstrip("/")
+            self._license.configure(self.license_key_var.get().strip())
+        except Exception:
+            pass
+
+        ok = False
+        try:
+            ok = bool(self._license.activate(version="autobot"))
+        except Exception:
+            ok = False
+
+        if not ok:
+            st = {}
+            try:
+                st = self._license.last_status()
+            except Exception:
+                st = {}
+            reason = st.get("reason") or "unknown"
+            try:
+                messagebox.showerror(APP_NAME, "❌ License NOT valid.\n\nReason: " + str(reason))
+            except Exception:
+                pass
+            self._log("⛔ START BLOCKED: license not valid (" + str(reason) + ").")
+            self._set_badge(self.badge_arm, "STATUS: STOP", THEME_DANGER)
+            return
+
+        def _on_blocked(reason):
+            try:
+                self._log(("⌛ LICENSE EXPIRED" if str(reason)=="expired" else ("⛔ LICENSE BLOCKED: " + str(reason))))
+            except Exception:
+                pass
+            try:
+                self._engine.enable_trading(False)
+            except Exception:
+                pass
+            try:
+                self._set_badge(self.badge_arm, "STATUS: STOP", THEME_DANGER)
+            except Exception:
+                pass
+            try:
+                messagebox.showerror(APP_NAME, "⌛ License expired.\n\nPlease renew your subscription to continue trading.") if str(reason)=="expired" else messagebox.showerror(APP_NAME, "⛔ License blocked.\n\nReason: " + str(reason) + "\n\nTrading has been stopped.")
+            except Exception:
+                pass
+
+        try:
+            self._license.start_heartbeat(interval_sec=25.0, on_blocked=_on_blocked)
+        except Exception:
+            pass
+
         self._engine.enable_trading(True)
-        self._set_badge(self.badge_arm, "STATO: ARMED", THEME_SUCCESS)
-        self._log("🟢 START: ARMED. Opera SOLO se SITO è CONNESSO.")
+        self._set_badge(self.badge_arm, "STATUS: ARMED", THEME_SUCCESS)
+        self._log("🟢 START: ARMED. Trading is enabled only with a valid online license.")
 
     def _stop_trading(self):
+        try:
+            self._license.stop_heartbeat()
+        except Exception:
+            pass
+
         self._engine.enable_trading(False)
-        self._set_badge(self.badge_arm, "STATO: STOP", THEME_DANGER)
+        self._set_badge(self.badge_arm, "STATUS: STOP", THEME_DANGER)
         self._log("🔴 STOP.")
 
     def _test_email(self):
@@ -644,7 +773,7 @@ class App(tk.Tk):
             self._log("✅ Test email inviato.")
         except Exception as e:
             self._log(f"❌ Test email FAIL: {e}")
-            messagebox.showerror("Email", f"Errore invio: {e}")
+            messagebox.showerror("Email", f"Send error: {e}")
 
     # --------------- Signal callbacks ---------------
     def _log(self, msg: str):
@@ -666,13 +795,13 @@ class App(tk.Tk):
             self.txt_log.see("end")
 
 
-        # Poll status -> badge SITO
+        # Poll status -> SERVER badge
         try:
             self._poll_connected = bool(self._poller.is_connected())
             if self._poll_connected:
-                self._set_badge(self.badge_site, "SITO: CONNESSO", THEME_SUCCESS)
+                self._set_badge(self.badge_site, "SERVER: ONLINE", THEME_SUCCESS)
             else:
-                self._set_badge(self.badge_site, "SITO: NON CONNESSO", THEME_WARNING)
+                self._set_badge(self.badge_site, "SERVER: OFFLINE", THEME_WARNING)
         except Exception:
             pass
 
@@ -841,7 +970,7 @@ if __name__ == "__main__":
         except:
             pass
         try:
-            messagebox.showerror("X-Trader AutoBot", "Errore avvio GUI.\n\nGuarda XTraderAutoBot_fatal.log\n\n" + str(e))
+            messagebox.showerror("X-Trader AutoBot", "GUI startup error.\n\nSee XTraderAutoBot_fatal.log\n\n" + str(e))
         except:
-            _fatal("Errore avvio GUI.\n\nGuarda XTraderAutoBot_fatal.log\n\n" + str(e))
+            _fatal("GUI startup error.\n\nSee XTraderAutoBot_fatal.log\n\n" + str(e))
         raise

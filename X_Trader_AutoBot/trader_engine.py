@@ -226,10 +226,10 @@ class TraderEngine:
     def _tick_position_monitor(self):
         """
         Background monitor (stile X_Trader_Trading.py):
-        - Stato posizione SOLO da DEBT: borrowedQuote=LONG, borrowedBase=SHORT, no debt=FLAT.
-        - Se la posizione si chiude in background (SL/TP/manuale) => log + cancella ordini residui.
+        - Position state SOLO da DEBT: borrowedQuote=LONG, borrowedBase=SHORT, no debt=FLAT.
+        - Se la position si chiude in background (SL/TP/manuale) => log + cancel remaining orders.
         - Se resta debito residuo (molto ridotto) e non ci sono open orders => prova REPAY.
-        - Guard SL/TP: se la posizione è aperta ma manca SL/TP => riposiziona (cooldown).
+        - Guard SL/TP: se la position è aperta ma manca SL/TP => riposiziona (cooldown).
         """
         if not self._enabled:
             return
@@ -337,7 +337,7 @@ class TraderEngine:
         except Exception:
             pass
 
-        # 🛡️ Guard SL/TP: se posizione aperta ma manca SL/TP => riposiziona (cooldown)
+        # 🛡️ Guard SL/TP: se position aperta ma manca SL/TP => riposiziona (cooldown)
         try:
             if pos in ("long", "short") and (sl_pct > 0.0 or tp_pct > 0.0):
                 if now_ts >= float(self._guard_next or 0.0):
